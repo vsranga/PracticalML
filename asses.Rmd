@@ -1,7 +1,7 @@
 ---
 title: "Predict Quality of Weight Lifting"
 author: "Ranga"
-date: "July 26, 2015"
+date: "August 23, 2015"
 output: html_document
 ---
 
@@ -9,7 +9,7 @@ This is a project to predict How well a weight lifting excercise has been done a
 
 We begin by reading the data and extracting parameters relevent to acceleration only. 
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 library(caret)
 library(randomForest)
 library(party)
@@ -17,22 +17,21 @@ library(rpart)
 
 initD <- read.csv("pml-training.csv")
 accelNames <- grep("accel_", names(initD))
-cnames <- names(initD)[accelNames]
+
 ```
+
 
 Then do preprocessing to facilitate learning
 
 ```{r}
 # add 'classe' field in column 160 to the data
-accelNames <- c(1:7, accelNames, 160)
-baseD <- initD[accelNames]
-
-#preprocess
-baseD$new_window <- (baseD$new_window=="yes")*1
+accelNames <- c(accelNames, 160)
+baseD <- initD[, accelNames]
 
 # remove fields which have NA
 naFields <- grep("var_", names(baseD))
 baseD <- baseD[,-naFields]
+
 ```
 
 Split the  data set for testing
@@ -46,43 +45,35 @@ testingD <- baseD[-inTrain,]
 dim(trainD); dim(testingD)
 
 
-# create 3 set of features
-# (1) parameters only,(2) UserName+timestamp+parameters,(3)timestamp+parameters
-paramD <- trainD[, 8:24]
-UsDuParamD <- trainD[,2:24]
-duParamD <- trainD[,3:24]
-
-testParamD <- testingD[, 8:24]
-testUsDuParamD <-  testingD[,2:24]
-testduParamD <- testingD[,3:24]
+paramD <- trainD
+testParamD <- testingD
 ```
 
-We will try the following models:
+We will build the models the following algorithms:
 1) Decision Tree
 2) bagging
 3) random forest
 
 Then test against the test data we have created. Identify the model which gives the best result and use it for predicting against the test data provided in pml-testing. xls
 
-```{r}
-# model using decision tree - params without timestamp
+# Decision Tree Algo
+We will build the decision tree model using method="rpart" in caret package.
+```{r warning=FALSE}
+# model using decision tree
 modFit <-train(classe ~ .,method="rpart",data=paramD)
 print(modFit$finalModel)
 plot(modFit$finalModel, uniform=TRUE,
     main="Classification Tree")
     text(modFit$finalModel, use.n=TRUE, all=TRUE, cex=.8)
 pred <- predict(modFit,newdata=testParamD)
-res <- (pred==testParamD$classe)*1
-correctPred <- sum(res)/length(res)
-correctPred
+decisionTreeCm <- confusionMatrix(pred, testParamD$classe)
+decisionTreeCm
 
-# params include timestamp
-dumodFit <-train(classe ~ .,method="rpart",data=duParamD)
-dupred<- predict(dumodFit,newdata=testduParamD)
-dures <- (dupred==testduParamD$classe)*1
-ducorrectPred <- sum(dures)/length(dures)
-ducorrectPred
+```
 
+#Bagging Algo
+We will build the bagging model using bag function in caret package.
+```{r warning=FALSE}
 # model using bag algo
 predictors = data.frame(paramD[,1:16])
 #install.packages("party")
@@ -91,31 +82,27 @@ treebag <- bag(predictors, paramD$classe, B = 10, vars = ncol(predictors),
             predict = ctreeBag$pred,
             aggregate = ctreeBag$aggregate))
 bagPred <- predict(treebag,testParamD[,1:16])
-bagres <- (bagPred==testParamD$classe)*1
-bagCorrect <- sum(bagres)/length(bagres)
-bagCorrect
+bagCm <- confusionMatrix(bagPred, testParamD$classe)
+bagCm
 ```
 
-# model using random forest algo
+# Model using Random Forest algo
+During the training of Random Forest model,I noticed it took a lot of time to generate the model. So I created the model once and saved it using saveRDS fucntion into the working directory. It can be loaded later while doing a prediction
+
 rfFit <-train( classe ~ .,data=paramD,method="rf",prox=TRUE, eval=FALSE)
+saveRDS(rfFit, file="rfModel.rds")
 
 ```{r}
 rfFit = readRDS("rfModel.rds")
 
+#Run the prediction on test data
+valpred <- predict(rfFit,newdata=testParamD)
 
-# Test the models against test set 
-tesRFpred <- predict(rfFit,newdata=testParamD)
-testRFResult <- (tesRFpred==testParamD$classe)*1
-rfCorrect <- sum(testRFResult)/length(testRFResult)
-rfCorrect
-
-
-#preProcess validation data run validation test for random forest
-valinitD <- read.csv("pml-testing.csv")
-valbaseD <- valinitD[accelNames]
-valbaseD$new_window <- (valbaseD$new_window=="yes")*1
-valbaseD <- valbaseD[,-naFields]
-valparamD <- valbaseD[, 8:24]
-valpred <- predict(rfFit,newdata=valparamD)
-valpred
+rfModelCm <- confusionMatrix(valpred, testParamD$classe)
+rfModelCm
 ```
+Random Forest gives the highest accuracy of 98.2%, among the 3 models evaluated with test data. When run with the validation test data given in pml-testing.csv, the model predicted 18 out of 20 correct.
+
+#Conclusion
+It is reasonable to expect 90% accuracy on out of sample tests.
+
